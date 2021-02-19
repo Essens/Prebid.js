@@ -1,88 +1,96 @@
-var bidfactory = require('src/bidfactory.js');
-var bidmanager = require('src/bidmanager.js');
-var Ajax = require('src/ajax');
-var utils = require('src/utils.js');
-var adaptermanager = require('src/adaptermanager');
+import * as utils from '../src/utils.js';
+import {registerBidder} from '../src/adapters/bidderFactory.js';
+import {config} from '../src/config.js';
 
-/**
- * Adapter for requesting bids from Admixer.
- *
- * @returns {{callBids: _callBids,responseCallback: _responseCallback}}
- */
-var AdmixerAdapter = function AdmixerAdapter() {
-  var invUrl = '//inv-nets.admixer.net/prebid.aspx';
-  var invVastUrl = '//inv-nets.admixer.net/videoprebid.aspx';
-
-  function _callBids(data) {
-    var bids = data.bids || [];
-    for (var i = 0, ln = bids.length; i < ln; i++) {
-      var bid = bids[i];
-      var params = {
-        'sizes': utils.parseSizesInput(bid.sizes).join('-'),
-        'zone': bid.params && bid.params.zone,
-        'callback_uid': bid.placementCode
-      };
-      if (params.zone) {
-        if (bid.mediaType === 'video') {
-          var videoParams = {};
-          if (typeof bid.video === 'object') {
-            Object.assign(videoParams, bid.video);
-          }
-          Object.assign(videoParams, params);
-          _requestBid(invVastUrl, params);
-        } else {
-          _requestBid(invUrl, params);
+const BIDDER_CODE = 'admixer';
+const ALIASES = ['go2net', 'adblender'];
+const ENDPOINT_URL = 'https://inv-nets.admixer.net/prebid.1.1.aspx';
+export const spec = {
+  code: BIDDER_CODE,
+  aliases: ALIASES,
+  supportedMediaTypes: ['banner', 'video'],
+  /**
+   * Determines whether or not the given bid request is valid.
+   */
+  isBidRequestValid: function (bid) {
+    return !!bid.params.zone;
+  },
+  /**
+   * Make a server request from the list of BidRequests.
+   */
+  buildRequests: function (validRequest, bidderRequest) {
+    const payload = {
+      imps: [],
+      fpd: config.getConfig('fpd')
+    };
+    let endpointUrl;
+    if (bidderRequest) {
+      const {bidderCode} = bidderRequest;
+      endpointUrl = config.getConfig(`${bidderCode}.endpoint_url`);
+      if (bidderRequest.refererInfo && bidderRequest.refererInfo.referer) {
+        payload.referrer = encodeURIComponent(bidderRequest.refererInfo.referer);
+      }
+      if (bidderRequest.gdprConsent) {
+        payload.gdprConsent = {
+          consentString: bidderRequest.gdprConsent.consentString,
+          // will check if the gdprApplies field was populated with a boolean value (ie from page config).  If it's undefined, then default to true
+          gdprApplies: (typeof bidderRequest.gdprConsent.gdprApplies === 'boolean') ? bidderRequest.gdprConsent.gdprApplies : true
         }
-      } else {
-        var bidObject = bidfactory.createBid(2);
-        bidObject.bidderCode = 'admixer';
-        bidmanager.addBidResponse(params.callback_uid, bidObject);
+      }
+      if (bidderRequest.uspConsent) {
+        payload.uspConsent = bidderRequest.uspConsent;
       }
     }
-  }
-
-  function _requestBid(url, params) {
-    Ajax.ajax(url, _responseCallback, params, {method: 'GET', withCredentials: true});
-  }
-
-  function _responseCallback(adUnit) {
+    validRequest.forEach((bid) => {
+      payload.imps.push(bid);
+    });
+    const payloadString = JSON.stringify(payload);
+    return {
+      method: 'GET',
+      url: endpointUrl || ENDPOINT_URL,
+      data: `data=${payloadString}`,
+    };
+  },
+  /**
+   * Unpack the response from the server into a list of bids.
+   */
+  interpretResponse: function (serverResponse, bidRequest) {
+    const bidResponses = [];
     try {
-      adUnit = JSON.parse(adUnit);
-    } catch (_error) {
-      adUnit = {result: {cpm: 0}};
-      utils.logError(_error);
+      const {body: {ads = []} = {}} = serverResponse;
+      ads.forEach((bidResponse) => {
+        const bidResp = {
+          requestId: bidResponse.bidId,
+          cpm: bidResponse.cpm,
+          width: bidResponse.width,
+          height: bidResponse.height,
+          ad: bidResponse.ad,
+          ttl: bidResponse.ttl,
+          creativeId: bidResponse.creativeId,
+          netRevenue: bidResponse.netRevenue,
+          currency: bidResponse.currency,
+          vastUrl: bidResponse.vastUrl,
+          dealId: bidResponse.dealId,
+        };
+        bidResponses.push(bidResp);
+      });
+    } catch (e) {
+      utils.logError(e);
     }
-    var adUnitCode = adUnit.callback_uid;
-    var bid = adUnit.result;
-    var bidObject;
-    if (bid.cpm > 0) {
-      bidObject = bidfactory.createBid(1);
-      bidObject.bidderCode = 'admixer';
-      bidObject.cpm = bid.cpm;
-      if (bid.vastUrl) {
-        bidObject.mediaType = 'video';
-        bidObject.vastUrl = bid.vastUrl;
-        bidObject.descriptionUrl = bid.vastUrl;
-      } else {
-        bidObject.ad = bid.ad;
+    return bidResponses;
+  },
+  getUserSyncs: function(syncOptions, serverResponses, gdprConsent) {
+    const pixels = [];
+    serverResponses.forEach(({body: {cm = {}} = {}}) => {
+      const {pixels: img = [], iframes: frm = []} = cm;
+      if (syncOptions.pixelEnabled) {
+        img.forEach((url) => pixels.push({type: 'image', url}));
       }
-      bidObject.width = bid.width;
-      bidObject.height = bid.height;
-    } else {
-      bidObject = bidfactory.createBid(2);
-      bidObject.bidderCode = 'admixer';
-    }
-    bidmanager.addBidResponse(adUnitCode, bidObject);
+      if (syncOptions.iframeEnabled) {
+        frm.forEach((url) => pixels.push({type: 'iframe', url}));
+      }
+    });
+    return pixels;
   }
-
-  return {
-    callBids: _callBids,
-    responseCallback: _responseCallback
-  };
 };
-
-adaptermanager.registerBidAdapter(new AdmixerAdapter(), 'admixer', {
-  supportedMediaTypes: ['video']
-});
-
-module.exports = AdmixerAdapter;
+registerBidder(spec);

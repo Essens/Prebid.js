@@ -1,131 +1,134 @@
-/**
- * @overview AdButler Prebid.js adapter.
- * @author dkharton
- */
-
 'use strict';
 
-var utils = require('src/utils.js');
-var adloader = require('src/adloader.js');
-var bidmanager = require('src/bidmanager.js');
-var bidfactory = require('src/bidfactory.js');
-var adaptermanager = require('src/adaptermanager');
+import * as utils from '../src/utils.js';
+import {config} from '../src/config.js';
+import {registerBidder} from '../src/adapters/bidderFactory.js';
 
-var AdButlerAdapter = function AdButlerAdapter() {
-  function _callBids(params) {
-    var bids = params.bids || [];
-    var callbackData = {};
-    var zoneCount = {};
-    var pageID = Math.floor(Math.random() * 10e6);
+const BIDDER_CODE = 'adbutler';
 
-    // Build and send bid requests
-    for (var i = 0; i < bids.length; i++) {
-      var bid = bids[i];
-      var zoneID = utils.getBidIdParameter('zoneID', bid.params);
-      var callbackID;
+export const spec = {
+  code: BIDDER_CODE,
+  pageID: Math.floor(Math.random() * 10e6),
+  aliases: ['divreach', 'doceree'],
 
-      if (!(zoneID in zoneCount)) {
-        zoneCount[zoneID] = 0;
+  isBidRequestValid: function (bid) {
+    return !!(bid.params.accountID && bid.params.zoneID);
+  },
+
+  buildRequests: function (validBidRequests) {
+    let i;
+    let zoneID;
+    let bidRequest;
+    let accountID;
+    let keyword;
+    let domain;
+    let requestURI;
+    let serverRequests = [];
+    let zoneCounters = {};
+    let extraParams = {};
+
+    for (i = 0; i < validBidRequests.length; i++) {
+      bidRequest = validBidRequests[i];
+      zoneID = utils.getBidIdParameter('zoneID', bidRequest.params);
+      accountID = utils.getBidIdParameter('accountID', bidRequest.params);
+      keyword = utils.getBidIdParameter('keyword', bidRequest.params);
+      domain = utils.getBidIdParameter('domain', bidRequest.params);
+      extraParams = utils.getBidIdParameter('extra', bidRequest.params);
+
+      if (!(zoneID in zoneCounters)) {
+        zoneCounters[zoneID] = 0;
       }
 
-      // build callbackID to get placementCode later
-      callbackID = zoneID + '_' + zoneCount[zoneID];
+      if (typeof domain === 'undefined' || domain.length === 0) {
+        domain = 'servedbyadbutler.com';
+      }
 
-      callbackData[callbackID] = {};
-      callbackData[callbackID].bidId = bid.bidId;
+      requestURI = 'https://' + domain + '/adserve/;type=hbr;';
+      requestURI += 'ID=' + encodeURIComponent(accountID) + ';';
+      requestURI += 'setID=' + encodeURIComponent(zoneID) + ';';
+      requestURI += 'pid=' + encodeURIComponent(spec.pageID) + ';';
+      requestURI += 'place=' + encodeURIComponent(zoneCounters[zoneID]) + ';';
 
-      var adRequest = buildRequest(bid, zoneCount[zoneID], pageID);
-      zoneCount[zoneID]++;
+      // append the keyword for targeting if one was passed in
+      if (keyword !== '') {
+        requestURI += 'kw=' + encodeURIComponent(keyword) + ';';
+      }
 
-      adloader.loadScript(adRequest);
-    }
-
-    // Define callback function for bid responses
-    $$PREBID_GLOBAL$$.adbutlerCB = function(aBResponseObject) {
-      var bidResponse = {};
-      var callbackID = aBResponseObject.zone_id + '_' + aBResponseObject.place;
-      var width = parseInt(aBResponseObject.width);
-      var height = parseInt(aBResponseObject.height);
-      var isCorrectSize = false;
-      var isCorrectCPM = true;
-      var CPM;
-      var minCPM;
-      var maxCPM;
-      var bidObj = callbackData[callbackID] ? utils.getBidRequest(callbackData[callbackID].bidId) : null;
-
-      if (bidObj) {
-        if (aBResponseObject.status === 'SUCCESS') {
-          CPM = aBResponseObject.cpm;
-          minCPM = utils.getBidIdParameter('minCPM', bidObj.params);
-          maxCPM = utils.getBidIdParameter('maxCPM', bidObj.params);
-
-          // Ensure response CPM is within the given bounds
-          if (minCPM !== '' && CPM < parseFloat(minCPM)) {
-            isCorrectCPM = false;
-          }
-          if (maxCPM !== '' && CPM > parseFloat(maxCPM)) {
-            isCorrectCPM = false;
-          }
-
-          // Ensure that response ad matches one of the placement sizes.
-          utils._each(bidObj.sizes, function(size) {
-            if (width === size[0] && height === size[1]) {
-              isCorrectSize = true;
-            }
-          });
-
-          if (isCorrectCPM && isCorrectSize) {
-            bidResponse = bidfactory.createBid(1, bidObj);
-            bidResponse.bidderCode = 'adbutler';
-            bidResponse.cpm = CPM;
-            bidResponse.width = width;
-            bidResponse.height = height;
-            bidResponse.ad = aBResponseObject.ad_code;
-            bidResponse.ad += addTrackingPixels(aBResponseObject.tracking_pixels);
-          } else {
-            bidResponse = bidfactory.createBid(2, bidObj);
-            bidResponse.bidderCode = 'adbutler';
-          }
-        } else {
-          bidResponse = bidfactory.createBid(2, bidObj);
-          bidResponse.bidderCode = 'adbutler';
+      for (let key in extraParams) {
+        if (extraParams.hasOwnProperty(key)) {
+          let val = encodeURIComponent(extraParams[key]);
+          requestURI += `${key}=${val};`;
         }
-
-        bidmanager.addBidResponse(bidObj.placementCode, bidResponse);
       }
-    };
-  }
 
-  function buildRequest(bid, adIndex, pageID) {
-    var accountID = utils.getBidIdParameter('accountID', bid.params);
-    var zoneID = utils.getBidIdParameter('zoneID', bid.params);
-    var keyword = utils.getBidIdParameter('keyword', bid.params);
-    var domain = utils.getBidIdParameter('domain', bid.params);
-
-    if (typeof domain === 'undefined' || domain.length === 0) {
-      domain = 'servedbyadbutler.com';
+      zoneCounters[zoneID]++;
+      serverRequests.push({
+        method: 'GET',
+        url: requestURI,
+        data: {},
+        bidRequest: bidRequest
+      });
     }
+    return serverRequests;
+  },
 
-    var requestURI = location.protocol + '//' + domain + '/adserve/;type=hbr;';
-    requestURI += 'ID=' + encodeURIComponent(accountID) + ';';
-    requestURI += 'setID=' + encodeURIComponent(zoneID) + ';';
-    requestURI += 'pid=' + encodeURIComponent(pageID) + ';';
-    requestURI += 'place=' + encodeURIComponent(adIndex) + ';';
+  interpretResponse: function (serverResponse, bidRequest) {
+    const bidObj = bidRequest.bidRequest;
+    let bidResponses = [];
+    let bidResponse = {};
+    let isCorrectSize = false;
+    let isCorrectCPM = true;
+    let CPM;
+    let minCPM;
+    let maxCPM;
+    let width;
+    let height;
 
-    // append the keyword for targeting if one was passed in
-    if (keyword !== '') {
-      requestURI += 'kw=' + encodeURIComponent(keyword) + ';';
+    serverResponse = serverResponse.body;
+    if (serverResponse && serverResponse.status === 'SUCCESS' && bidObj) {
+      CPM = serverResponse.cpm;
+      minCPM = utils.getBidIdParameter('minCPM', bidObj.params);
+      maxCPM = utils.getBidIdParameter('maxCPM', bidObj.params);
+      width = parseInt(serverResponse.width);
+      height = parseInt(serverResponse.height);
+
+      // Ensure response CPM is within the given bounds
+      if (minCPM !== '' && CPM < parseFloat(minCPM)) {
+        isCorrectCPM = false;
+      }
+      if (maxCPM !== '' && CPM > parseFloat(maxCPM)) {
+        isCorrectCPM = false;
+      }
+
+      // Ensure that response ad matches one of the placement sizes.
+      utils._each(utils.deepAccess(bidObj, 'mediaTypes.banner.sizes', []), function (size) {
+        if (width === size[0] && height === size[1]) {
+          isCorrectSize = true;
+        }
+      });
+      if (isCorrectCPM && isCorrectSize) {
+        bidResponse.requestId = bidObj.bidId;
+        bidResponse.bidderCode = bidObj.bidder;
+        bidResponse.creativeId = serverResponse.placement_id;
+        bidResponse.cpm = CPM;
+        bidResponse.width = width;
+        bidResponse.height = height;
+        bidResponse.ad = serverResponse.ad_code;
+        bidResponse.ad += spec.addTrackingPixels(serverResponse.tracking_pixels);
+        bidResponse.currency = 'USD';
+        bidResponse.netRevenue = true;
+        bidResponse.ttl = config.getConfig('_bidderTimeout');
+        bidResponse.referrer = utils.deepAccess(bidObj, 'refererInfo.referer');
+        bidResponses.push(bidResponse);
+      }
     }
-    requestURI += 'jsonpfunc=$$PREBID_GLOBAL$$.adbutlerCB;';
-    requestURI += 'click=CLICK_MACRO_PLACEHOLDER';
+    return bidResponses;
+  },
 
-    return requestURI;
-  }
-
-  function addTrackingPixels(trackingPixels) {
-    var trackingPixelMarkup = '';
-    utils._each(trackingPixels, function(pixelURL) {
-      var trackingPixel = '<img height="0" width="0" border="0" style="display:none;" src="';
+  addTrackingPixels: function (trackingPixels) {
+    let trackingPixelMarkup = '';
+    utils._each(trackingPixels, function (pixelURL) {
+      let trackingPixel = '<img height="0" width="0" border="0" style="display:none;" src="';
       trackingPixel += pixelURL;
       trackingPixel += '">';
 
@@ -133,14 +136,5 @@ var AdButlerAdapter = function AdButlerAdapter() {
     });
     return trackingPixelMarkup;
   }
-
-  // Export the callBids function, so that prebid.js can execute this function
-  // when the page asks to send out bid requests.
-  return {
-    callBids: _callBids
-  };
 };
-
-adaptermanager.registerBidAdapter(new AdButlerAdapter(), 'adbutler');
-
-module.exports = AdButlerAdapter;
+registerBidder(spec);

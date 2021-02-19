@@ -1,230 +1,231 @@
-import {expect} from 'chai';
-import {cloneJson} from 'src/utils';
-import adloader from 'src/adloader';
-import bidmanager from 'src/bidmanager';
-import LifestreetAdapter from 'modules/lifestreetBidAdapter';
+import { expect } from 'chai';
+import { BANNER, VIDEO } from 'src/mediaTypes.js';
+import { spec } from 'modules/lifestreetBidAdapter.js';
 
-const BIDDER_REQUEST = {
-  auctionStart: new Date().getTime(),
-  bidderCode: 'lifestreet',
-  bidderRequestId: '42af176a304779',
-  bids: [{
-    bidId: '5b19582c30a2d9',
-    bidder: 'lifestreet',
-    bidderRequestId: '42af176a304779',
-    params: {
-      ad_size: '160x600',
-      adkey: '78c',
-      jstag_url: '//ads.lfstmedia.com/getad?site=285071',
-      slot: 'slot166704',
-      timeout: 1500
-    },
-    placementCode: 'bar',
-    requestId: '6657bfa9-46b9-4ed8-9ce5-956f96efb13d',
-    sizes: [[160, 600]]
-  }],
-  requestId: '6657bfa9-46b9-4ed8-9ce5-956f96efb13d',
-  start: new Date().getTime() + 4,
-  timeout: 3000
-};
+describe('lifestreetBidAdapter', function() {
+  let bidRequests;
+  let videoBidRequests;
+  let bidResponses;
+  let videoBidResponses;
+  beforeEach(function() {
+    bidRequests = [
+      {
+        bidder: 'lifestreet',
+        params: {
+          slot: 'slot166704',
+          adkey: '78c',
+          ad_size: '160x600'
+        },
+        mediaTypes: {
+          banner: {
+            sizes: [
+              [160, 600],
+              [300, 600]
+            ]
+          }
+        },
+        sizes: [
+          [160, 600],
+          [300, 600]
+        ]
+      }
+    ];
 
-describe('LifestreetAdapter', () => {
-  let adapter;
-  beforeEach(() => adapter = new LifestreetAdapter());
+    bidResponses = {
+      body: {
+        cpm: 0.1,
+        netRevenue: true,
+        content_type: 'display_flash',
+        width: 160,
+        currency: 'USD',
+        ttl: 86400,
+        content: '<iframe src=\'https://ads.lfstmedia.com/displayAd?__ads=ip37346-u0T8r2uJ8245jv6i2QE8Qu&adt=5748927953915945176&seq=2&plc=K73sUSWIH9WwpIQiGybtg8lYdYFld5NvswMmfGBMz6U&__df=true&clickUrl=https%3A%2F%2Fads.lfstmedia.com%2Fclick%2Fcmp15299%2F5748927953915945176%2F2%3F__ads%3Dip37346-u0T8r2uJ8245jv6i2QE8Qu%26adkey%3D6bd%26slot%3Dslot166704%26__stamp%3D1583331395140%26ad%3Dcrv197050%26_cx%3D%24%24CX%24%24%26_cy%3D%24%24CY%24%24%26_celt%3D%24%24ELT-ID%24%24%26redirectURL%3D\' width=\'160\' height=\'600\' frameBorder=\'0\' scrolling=\'no\' framespacing=\'0\' marginheight=\'0\' marginwidth=\'0\'><!--test--><\/iframe>\n',
+        creativeId: 7985076,
+        height: 600,
+        status: 1
+      }
+    };
+    videoBidRequests = [
+      {
+        bidder: 'lifestreet',
+        params: {
+          slot: 'slot1227631',
+          adkey: 'a98',
+          ad_size: '640x480'
+        },
+        mediaTypes: {
+          video: {
+            sizes: [
+              [640, 480],
+            ]
+          }
+        }
+      }
+    ]
 
-  describe('callBids()', () => {
-    it('exists and is a function', () => {
-      expect(adapter.callBids).to.exist.and.to.be.a('function');
-    });
-
-    describe('request', () => {
-      let tagRequests;
-      let slotParams;
-      let request;
-
-      beforeEach(() => {
-        tagRequests = [];
-        request = cloneJson(BIDDER_REQUEST);
-        sinon.stub(adloader, 'loadScript', (url, callback) => {
-          tagRequests.push(url);
-          callback();
-        });
-        slotParams = {};
-        window.LSM_Slot = (params) => {
-          slotParams = params;
+    videoBidResponses = {
+      body: {
+        cpm: 0.1,
+        netRevenue: true,
+        content_type: 'vast_3_0',
+        width: 640,
+        currency: 'USD',
+        ttl: 86400,
+        content: '<iframe src="https://ads.lfstmedia.com/displayAd?__ads=ip38770-u0T8r2uJ8245jv6i2QE8Qu&adt=7734389071973843496&seq=2&plc=QEw02HSSpFZCrGaMUP5rN01QQtwPM5iEI5EQzt1nV4E&__df=true&clickUrl=https%3A%2F%2Fads.lfstmedia.com%2Fclick%2Fcmp20228%2F7734389071973843496%2F2%3F__ads%3Dip38770-u0T8r2uJ8245jv6i2QE8Qu%26adkey%3Dcdc%26slot%3Dslot1227631%26__stamp%3D1583766419183%26ad%3Dcrv225652%26_cx%3D%24%24CX%24%24%26_cy%3D%24%24CY%24%24%26_celt%3D%24%24ELT-ID%24%24%26redirectURL%3D" width="640" height="480" frameBorder="0" scrolling="no" framespacing="0" marginheight="0" marginwidth="0"><!--test--><\/iframe>\n',
+        creativeId: 108323592,
+        height: 480,
+        status: 1
+      }
+    };
+  });
+  describe('implementation', function() {
+    describe('Bid validations', function() {
+      it('valid bid case', function() {
+        const validBid = {
+          bidder: 'lifestreet',
+          params: {
+            slot: 'slot166704',
+            adkey: '78c',
+            ad_size: '160x600'
+          }
         };
-      });
-      afterEach(() => {
-        adloader.loadScript.restore();
-        window.LSM_Slot = undefined;
+        expect(spec.isBidRequestValid(validBid)).to.equal(true);
       });
 
-      it('parameters should present', () => {
-        adapter.callBids({});
-        expect(tagRequests).to.be.empty;
+      it('invalid bid case', function() {
+        expect(spec.isBidRequestValid()).to.equal(false);
       });
 
-      it('parameters do not have supported size', () => {
-        request.bids[0].sizes = [[728, 90], [970, 90]];
-        adapter.callBids(request);
-        expect(tagRequests).to.be.empty;
+      it('invalid bid case: slot not passed', function() {
+        var validBid = {
+          bidder: 'lifestreet',
+          params: {
+            adkey: '78c',
+            ad_size: '160x600'
+          }
+        };
+        expect(spec.isBidRequestValid(validBid)).to.equal(false);
       });
 
-      it('tag when size is supported', () => {
-        request.bids[0].sizes = [[728, 90], [970, 90], [160, 600]];
-        adapter.callBids(request);
-        expect(tagRequests.length).to.equal(1);
+      it('invalid bid case: adkey not passed', function() {
+        const validBid = {
+          bidder: 'lifestreet',
+          params: {
+            slot: 'slot166704',
+            ad_size: '160x600'
+          }
+        };
+        expect(spec.isBidRequestValid(validBid)).to.equal(false);
       });
 
-      it('tag when one size is provided', () => {
-        request.bids[0].sizes = [160, 600];
-        adapter.callBids(request);
-        expect(tagRequests.length).to.equal(1);
-      });
-
-      it('wrong size is provided', () => {
-        request.bids[0].sizes = [160];
-        adapter.callBids(request);
-        expect(tagRequests).to.be.empty;
-      });
-
-      it('ad_size is not provided', () => {
-        request.bids[0].params.ad_size = '';
-        adapter.callBids(request);
-        expect(tagRequests).to.be.empty;
-      });
-
-      it('slot is not provided', () => {
-        request.bids[0].params.slot = '';
-        adapter.callBids(request);
-        expect(tagRequests).to.be.empty;
-      });
-
-      it('adkey is not provided', () => {
-        request.bids[0].params.adkey = '';
-        adapter.callBids(request);
-        expect(tagRequests).to.be.empty;
-      });
-
-      it('jstag_url is not provided', () => {
-        request.bids[0].params.jstag_url = '';
-        adapter.callBids(request);
-        expect(tagRequests).to.be.empty;
-      });
-
-      it('should request a tag', () => {
-        window.LSM_Slot = undefined;
-        adapter.callBids(request);
-        expect(tagRequests.length).to.equal(1);
-        expect(tagRequests[0]).to.contain('ads.lfstmedia.com/getad?site=285071');
-      });
-
-      it('LSM_Slot function should contain expected parameters', () => {
-        adapter.callBids(request);
-        expect(slotParams.ad_size).to.equal('160x600');
-        expect(slotParams.adkey).to.equal('78c');
-        expect(slotParams.slot).to.equal('slot166704');
-        expect(slotParams._preload).to.equal('wait');
-        expect(slotParams._hb_request).to.equal('prebidJS-1.0');
-        expect(slotParams._timeout).to.equal(1500);
-        expect(slotParams).to.have.ownProperty('_onload');
-      });
-
-      it('Default timeout should be 700 milliseconds', () => {
-        request.bids[0].params.timeout = 0;
-        adapter.callBids(request);
-        expect(slotParams._timeout).to.equal(700);
+      it('invalid bid case: ad_size is not passed', function() {
+        const validBid = {
+          bidder: 'lifestreet',
+          params: {
+            slot: 'slot166704',
+            adkey: '78c'
+          }
+        };
+        expect(spec.isBidRequestValid(validBid)).to.equal(false);
       });
     });
 
-    describe('response', () => {
-      let slot;
-      let price;
-      let width;
-      let height;
+    describe('buildRequests spec method', function () {
+      it('method exists and is a function', function () {
+        expect(spec.buildRequests).to.exist.and.to.be.a('function');
+      });
 
-      beforeEach(() => {
-        sinon.stub(bidmanager, 'addBidResponse');
-        sinon.stub(adloader, 'loadScript', (url, callback) => {
-          callback();
-        });
-        slot = {};
-        price = 1.0;
-        width = 160;
-        height = 600;
-        window.LSM_Slot = (params) => {
-          params._onload(slot, '', price, width, height);
+      it('should not return request when no bids are present', function () {
+        const [request] = spec.buildRequests([]);
+        expect(request).to.be.undefined;
+      });
+
+      it('should return an url and request method ', function () {
+        const [request] = spec.buildRequests(bidRequests);
+        expect(request.method).to.equal('GET');
+        expect(request.url).to.be.a('string');
+      });
+
+      it('should return an url that contains all required fields', function () {
+        const [request] = spec.buildRequests(bidRequests);
+        expect(request.url).to.have.string('adkey');
+        expect(request.url).to.have.string('slot');
+        expect(request.url).to.have.string('ad_size');
+      });
+
+      it('should add GDPR consent information to the request', function () {
+        let consentString = 'BOJ8RZsOJ8RZsABAB8AAAAAZ+A==';
+        let bidderRequest = {
+          bidderCode: 'lifestreet',
+          auctionId: '1d1a030790a875',
+          bidderRequestId: '22edbae2744bf6',
+          timeout: 3000,
+          gdprConsent: {
+            consentString: consentString,
+            gdprApplies: true
+          }
         };
-      });
-      afterEach(() => {
-        bidmanager.addBidResponse.restore();
-        adloader.loadScript.restore();
-        window.LSM_Slot = undefined;
+        bidderRequest.bids = bidRequests;
+
+        const [request] = spec.buildRequests(bidRequests, bidderRequest);
+        expect(request.url).to.have.string('__gdpr=1');
+        expect(request.url).to.have.string(`__consent=${consentString}`);
       });
 
-      it('nobid for undefined LSM_Slot function', () => {
-        window.LSM_Slot = undefined;
-        adapter.callBids(BIDDER_REQUEST);
-        expect(bidmanager.addBidResponse.calledOnce).to.be.true;
-        expect(bidmanager.addBidResponse.firstCall.args[1].getStatusCode()).to.equal(2);
+      it('should add US privacy string to request', function() {
+        let consentString = '1YA-';
+        let bidderRequest = {
+          bidderCode: 'lifestreet',
+          auctionId: '1d1a030790a875',
+          bidderRequestId: '22edbae2744bf6',
+          timeout: 3000,
+          uspConsent: consentString
+        };
+        bidderRequest.bids = bidRequests;
+
+        const [request] = spec.buildRequests(bidRequests, bidderRequest);
+        expect(request.url).to.have.string(`__us_privacy=${consentString}`);
+      });
+    });
+
+    describe('server response', function() {
+      it('should return valid proper values', function() {
+        const request = spec.buildRequests(bidRequests);
+        const response = spec.interpretResponse(bidResponses, request);
+        expect(response).to.be.an('array').with.length.above(0);
+        expect(response[0].cpm).to.equal(bidResponses.body.cpm);
+        expect(response[0].width).to.equal(bidResponses.body.width);
+        expect(response[0].height).to.equal(bidResponses.body.height);
+        expect(response[0].creativeId).to.equal(bidResponses.body.creativeId);
+        expect(response[0].currency).to.equal('USD');
+        expect(response[0].netRevenue).to.equal(true);
+        expect(response[0].ttl).to.equal(bidResponses.body.ttl);
       });
 
-      it('nobid for error response', () => {
-        slot.state = () => { return 'error'; };
-        adapter.callBids(BIDDER_REQUEST);
-        expect(bidmanager.addBidResponse.calledOnce).to.be.true;
-        expect(bidmanager.addBidResponse.firstCall.args[1].getStatusCode()).to.equal(2);
+      it('should return proper mediaType for BANNER', function() {
+        const request = spec.buildRequests(bidRequests);
+        const [response] = spec.interpretResponse(bidResponses, request);
+        expect(response.mediaType).to.equal(BANNER);
       });
 
-      it('show existing slot', () => {
-        let isShown = false;
-        slot.state = () => { return 'loaded'; };
-        slot.getSlotObjectName = () => { return ''; };
-        slot.show = () => { isShown = true; };
-        adapter.callBids(BIDDER_REQUEST);
-        expect(bidmanager.addBidResponse.calledOnce).to.be.false;
-        expect(isShown).to.be.true;
+      it('should return proper mediaType for VIDEO', function() {
+        const request = spec.buildRequests(videoBidRequests);
+        const [response] = spec.interpretResponse(videoBidResponses, request);
+        expect(response.mediaType).to.equal(VIDEO);
       });
 
-      it('should bid', () => {
-        slot.state = () => { return 'loaded'; };
-        slot.getSlotObjectName = () => { return 'Test Slot'; };
-        adapter.callBids(BIDDER_REQUEST);
-        expect(bidmanager.addBidResponse.calledOnce).to.be.true;
-        let bidResponse = bidmanager.addBidResponse.firstCall.args[1];
-        expect(bidResponse.getStatusCode()).to.equal(1);
-        expect(bidResponse.ad).to.equal(`<div id="LSM_AD"></div>
-             <script type="text/javascript" src='//ads.lfstmedia.com/getad?site=285071'></script>
-             <script>
-              function receivedLSMMessage(ev) {
-                var key = ev.message ? 'message' : 'data';
-                var object = {};
-                try {
-                  object = JSON.parse(ev[key]);
-                } catch (e) {
-                  return;
-                }
-                if (object.message === 'LSMPrebid Response' && object.slotObject) {
-                  var slot  = object.slotObject;
-                  slot.__proto__ = slotapi.Slot.prototype;
-                  slot.getProperties()['_onload'] = function(slot) {
-                    if (slot.state() !== 'error') {
-                      slot.show();
-                    }
-                  };
-                  window[slot.getSlotObjectName()] = slot;
-                  slot.showInContainer(document.getElementById("LSM_AD"));
-                }
-              }
-              window.addEventListener('message', receivedLSMMessage, false);
-              window.parent.postMessage(JSON.stringify({
-                message: 'LSMPrebid Request',
-                slotName: 'Test Slot'
-              }), '*');
-            </script>`);
-        expect(bidResponse.cpm).to.equal(1.0);
-        expect(bidResponse.width).to.equal(160);
-        expect(bidResponse.height).to.equal(600);
+      it('should return a VAST XML for VIDEO', function() {
+        const request = spec.buildRequests(videoBidRequests);
+        const [response] = spec.interpretResponse(videoBidResponses, request);
+        expect(response.vastXml).to.be.a('string');
+        expect(response.vastXml).to.have.string('iframe');
+      });
+
+      it('should return an ad content for BANNER', function() {
+        const request = spec.buildRequests(bidRequests);
+        const [response] = spec.interpretResponse(bidResponses, request);
+        expect(response.ad).to.be.a('string');
+        expect(response.ad).to.have.string('iframe');
       });
     });
   });

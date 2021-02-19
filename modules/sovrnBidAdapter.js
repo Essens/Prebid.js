@@ -1,156 +1,211 @@
-var CONSTANTS = require('src/constants.json');
-var utils = require('src/utils.js');
-var bidfactory = require('src/bidfactory.js');
-var bidmanager = require('src/bidmanager.js');
-var adloader = require('src/adloader');
-var adaptermanager = require('src/adaptermanager');
+import * as utils from '../src/utils.js'
+import { registerBidder } from '../src/adapters/bidderFactory.js'
+import { BANNER } from '../src/mediaTypes.js'
+import { createEidsArray } from './userId/eids.js';
 
-/**
- * Adapter for requesting bids from Sovrn
- */
-var SovrnAdapter = function SovrnAdapter() {
-  var sovrnUrl = 'ap.lijit.com/rtb/bid';
+export const spec = {
+  code: 'sovrn',
+  supportedMediaTypes: [BANNER],
+  gvlid: 13,
 
-  function _callBids(params) {
-    var sovrnBids = params.bids || [];
+  /**
+   * Check if the bid is a valid zone ID in either number or string form
+   * @param {object} bid the Sovrn bid to validate
+   * @return boolean for whether or not a bid is valid
+   */
+  isBidRequestValid: function(bid) {
+    return !!(bid.params.tagid && !isNaN(parseFloat(bid.params.tagid)) && isFinite(bid.params.tagid))
+  },
 
-    _requestBids(sovrnBids);
-  }
+  /**
+   * Format the bid request object for our endpoint
+   * @param {BidRequest[]} bidRequests Array of Sovrn bidders
+   * @return object of parameters for Prebid AJAX request
+   */
+  buildRequests: function(bidReqs, bidderRequest) {
+    try {
+      let sovrnImps = [];
+      let iv;
+      let schain;
+      let eids;
+      let tpid = []
+      let criteoId;
 
-  function _requestBids(bidReqs) {
-    // build bid request object
-    var domain = window.location.host;
-    var page = window.location.pathname + location.search + location.hash;
+      utils._each(bidReqs, function (bid) {
+        if (!eids && bid.userId) {
+          eids = createEidsArray(bid.userId)
+          eids.forEach(function (id) {
+            if (id.uids && id.uids[0]) {
+              if (id.source === 'criteo.com') {
+                criteoId = id.uids[0].id
+              }
+              tpid.push({source: id.source, uid: id.uids[0].id})
+            }
+          })
+        }
 
-    var sovrnImps = [];
+        if (bid.schain) {
+          schain = schain || bid.schain
+        }
+        iv = iv || utils.getBidIdParameter('iv', bid.params)
 
-    // build impression array for sovrn
-    utils._each(bidReqs, function (bid) {
-      var tagId = utils.getBidIdParameter('tagid', bid.params);
-      var bidFloor = utils.getBidIdParameter('bidfloor', bid.params);
-      var adW = 0;
-      var adH = 0;
+        let bidSizes = (bid.mediaTypes && bid.mediaTypes.banner && bid.mediaTypes.banner.sizes) || bid.sizes
+        bidSizes = ((utils.isArray(bidSizes) && utils.isArray(bidSizes[0])) ? bidSizes : [bidSizes])
+        bidSizes = bidSizes.filter(size => utils.isArray(size))
+        const processedSizes = bidSizes.map(size => ({w: parseInt(size[0], 10), h: parseInt(size[1], 10)}))
+        const floorInfo = (bid.getFloor && typeof bid.getFloor === 'function') ? bid.getFloor({
+          currency: 'USD',
+          mediaType: 'banner',
+          size: '*'
+        }) : {}
+        floorInfo.floor = floorInfo.floor || utils.getBidIdParameter('bidfloor', bid.params)
 
-      // sovrn supports only one size per tagid, so we just take the first size if there are more
-      // if we are a 2 item array of 2 numbers, we must be a SingleSize array
-      var bidSizes = Array.isArray(bid.params.sizes) ? bid.params.sizes : bid.sizes;
-      var sizeArrayLength = bidSizes.length;
-      if (sizeArrayLength === 2 && typeof bidSizes[0] === 'number' && typeof bidSizes[1] === 'number') {
-        adW = bidSizes[0];
-        adH = bidSizes[1];
-      } else {
-        adW = bidSizes[0][0];
-        adH = bidSizes[0][1];
-      }
-
-      var imp =
-        {
+        const imp = {
+          adunitcode: bid.adUnitCode,
           id: bid.bidId,
           banner: {
-            w: adW,
-            h: adH
+            format: processedSizes,
+            w: 1,
+            h: 1,
           },
-          tagid: tagId,
-          bidfloor: bidFloor
-        };
-      sovrnImps.push(imp);
-    });
+          tagid: String(utils.getBidIdParameter('tagid', bid.params)),
+          bidfloor: floorInfo.floor
+        }
 
-    // build bid request with impressions
-    var sovrnBidReq = {
-      id: utils.getUniqueIdentifierStr(),
-      imp: sovrnImps,
-      site: {
-        domain: domain,
-        page: page
-      }
-    };
+        const segmentsString = utils.getBidIdParameter('segments', bid.params)
 
-    var scriptUrl = '//' + sovrnUrl + '?callback=window.$$PREBID_GLOBAL$$.sovrnResponse' +
-      '&src=' + CONSTANTS.REPO_AND_VERSION +
-      '&br=' + encodeURIComponent(JSON.stringify(sovrnBidReq));
-    adloader.loadScript(scriptUrl);
-  }
-
-  function addBlankBidResponses(impidsWithBidBack) {
-    var missing = utils.getBidderRequestAllAdUnits('sovrn');
-    if (missing) {
-      missing = missing.bids.filter(bid => impidsWithBidBack.indexOf(bid.bidId) < 0);
-    } else {
-      missing = [];
-    }
-
-    missing.forEach(function (bidRequest) {
-      // Add a no-bid response for this bid request.
-      var bid = {};
-      bid = bidfactory.createBid(2, bidRequest);
-      bid.bidderCode = 'sovrn';
-      bidmanager.addBidResponse(bidRequest.placementCode, bid);
-    });
-  }
-
-  // expose the callback to the global object:
-  $$PREBID_GLOBAL$$.sovrnResponse = function (sovrnResponseObj) {
-    var impidsWithBidBack = [];
-
-    // valid response object from sovrn
-    if (sovrnResponseObj && sovrnResponseObj.id && sovrnResponseObj.seatbid && sovrnResponseObj.seatbid.length !== 0 &&
-      sovrnResponseObj.seatbid[0].bid && sovrnResponseObj.seatbid[0].bid.length !== 0) {
-      sovrnResponseObj.seatbid[0].bid.forEach(function (sovrnBid) {
-        var responseCPM;
-        var placementCode = '';
-        var id = sovrnBid.impid;
-        var bid = {};
-
-        var bidObj = utils.getBidRequest(id);
-
-        if (bidObj) {
-          placementCode = bidObj.placementCode;
-          bidObj.status = CONSTANTS.STATUS.GOOD;
-
-          responseCPM = parseFloat(sovrnBid.price);
-
-          if (responseCPM !== 0) {
-            sovrnBid.placementCode = placementCode;
-            sovrnBid.size = bidObj.sizes;
-            var responseAd = sovrnBid.adm;
-
-            // build impression url from response
-            var responseNurl = '<img src="' + sovrnBid.nurl + '">';
-
-            // store bid response
-            // bid status is good (indicating 1)
-            bid = bidfactory.createBid(1, bidObj);
-            bid.creative_id = sovrnBid.id;
-            bid.bidderCode = 'sovrn';
-            bid.cpm = responseCPM;
-
-            // set ad content + impression url
-            // sovrn returns <script> block, so use bid.ad, not bid.adurl
-            bid.ad = decodeURIComponent(responseAd + responseNurl);
-
-            // Set width and height from response now
-            bid.width = parseInt(sovrnBid.w);
-            bid.height = parseInt(sovrnBid.h);
-
-            if (sovrnBid.dealid) {
-              bid.dealId = sovrnBid.dealid;
-            }
-
-            bidmanager.addBidResponse(placementCode, bid);
-            impidsWithBidBack.push(id);
+        if (segmentsString) {
+          imp.ext = {
+            deals: segmentsString.split(',').map(deal => deal.trim())
           }
         }
+
+        sovrnImps.push(imp);
       });
+
+      const page = bidderRequest.refererInfo.referer
+
+      // clever trick to get the domain
+      const domain = utils.parseUrl(page).hostname
+
+      const sovrnBidReq = {
+        id: utils.getUniqueIdentifierStr(),
+        imp: sovrnImps,
+        site: {
+          page,
+          domain
+        }
+      };
+
+      if (schain) {
+        sovrnBidReq.source = {
+          ext: {
+            schain
+          }
+        };
+      }
+
+      if (bidderRequest.gdprConsent) {
+        utils.deepSetValue(sovrnBidReq, 'regs.ext.gdpr', +bidderRequest.gdprConsent.gdprApplies);
+        utils.deepSetValue(sovrnBidReq, 'user.ext.consent', bidderRequest.gdprConsent.consentString)
+      }
+      if (bidderRequest.uspConsent) {
+        utils.deepSetValue(sovrnBidReq, 'regs.ext.us_privacy', bidderRequest.uspConsent);
+      }
+
+      if (eids) {
+        utils.deepSetValue(sovrnBidReq, 'user.ext.eids', eids)
+        utils.deepSetValue(sovrnBidReq, 'user.ext.tpid', tpid)
+        if (criteoId) {
+          utils.deepSetValue(sovrnBidReq, 'user.ext.prebid_criteoid', criteoId)
+        }
+      }
+
+      let url = `https://ap.lijit.com/rtb/bid?src=$$REPO_AND_VERSION$$`;
+      if (iv) url += `&iv=${iv}`;
+
+      return {
+        method: 'POST',
+        url: url,
+        data: JSON.stringify(sovrnBidReq),
+        options: {contentType: 'text/plain'}
+      }
+    } catch (e) {
+      utils.logError('Could not build bidrequest, error deatils:', e);
     }
-    addBlankBidResponses(impidsWithBidBack);
-  };
+  },
 
-  return {
-    callBids: _callBids
-  };
-};
+  /**
+   * Format Sovrn responses as Prebid bid responses
+   * @param {id, seatbid} sovrnResponse A successful response from Sovrn.
+   * @return {Bid[]} An array of formatted bids.
+  */
+  interpretResponse: function({ body: {id, seatbid} }) {
+    try {
+      let sovrnBidResponses = [];
+      if (id &&
+        seatbid &&
+        seatbid.length > 0 &&
+        seatbid[0].bid &&
+        seatbid[0].bid.length > 0) {
+        seatbid[0].bid.map(sovrnBid => {
+          sovrnBidResponses.push({
+            requestId: sovrnBid.impid,
+            cpm: parseFloat(sovrnBid.price),
+            width: parseInt(sovrnBid.w),
+            height: parseInt(sovrnBid.h),
+            creativeId: sovrnBid.crid || sovrnBid.id,
+            dealId: sovrnBid.dealid || null,
+            currency: 'USD',
+            netRevenue: true,
+            mediaType: BANNER,
+            ad: decodeURIComponent(`${sovrnBid.adm}<img src="${sovrnBid.nurl}">`),
+            ttl: sovrnBid.ext ? (sovrnBid.ext.ttl || 90) : 90
+          });
+        });
+      }
+      return sovrnBidResponses
+    } catch (e) {
+      utils.logError('Could not intrepret bidresponse, error deatils:', e);
+    }
+  },
 
-adaptermanager.registerBidAdapter(new SovrnAdapter(), 'sovrn');
+  getUserSyncs: function(syncOptions, serverResponses, gdprConsent, uspConsent) {
+    try {
+      const tracks = []
+      if (serverResponses && serverResponses.length !== 0) {
+        if (syncOptions.iframeEnabled) {
+          const iidArr = serverResponses.filter(resp => utils.deepAccess(resp, 'body.ext.iid'))
+            .map(resp => resp.body.ext.iid);
+          const params = [];
+          if (gdprConsent && gdprConsent.gdprApplies && typeof gdprConsent.consentString === 'string') {
+            params.push(['gdpr_consent', gdprConsent.consentString]);
+          }
+          if (uspConsent) {
+            params.push(['us_privacy', uspConsent]);
+          }
 
-module.exports = SovrnAdapter;
+          if (iidArr[0]) {
+            params.push(['informer', iidArr[0]]);
+            tracks.push({
+              type: 'iframe',
+              url: 'https://ap.lijit.com/beacon?' + params.map(p => p.join('=')).join('&')
+            });
+          }
+        }
+
+        if (syncOptions.pixelEnabled) {
+          serverResponses.filter(resp => utils.deepAccess(resp, 'body.ext.sync.pixels'))
+            .reduce((acc, resp) => acc.concat(resp.body.ext.sync.pixels), [])
+            .map(pixel => pixel.url)
+            .forEach(url => tracks.push({ type: 'image', url }))
+        }
+      }
+      return tracks
+    } catch (e) {
+      return []
+    }
+  },
+}
+
+registerBidder(spec);
