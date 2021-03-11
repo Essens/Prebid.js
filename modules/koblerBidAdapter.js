@@ -41,6 +41,7 @@ export const interpretResponse = function (serverResponse) {
           netRevenue: true,
           ttl: TIME_TO_LIVE_IN_SECONDS,
           ad: b.adm,
+          nurl: b.nurl,
           meta: {
             advertiserDomains: b.adomain
           }
@@ -50,6 +51,16 @@ export const interpretResponse = function (serverResponse) {
   }
   return bids;
 };
+
+export const onBidWon = function (bid) {
+  const cpm = bid.cpm || 0;
+  const adServerPrice = utils.deepAccess(bid, 'adserverTargeting.hb_pb') || 0;
+  if (utils.isStr(bid.nurl) && bid.nurl !== '') {
+    const winNotificationUrl = utils.replaceAuctionPrice(bid.nurl, cpm)
+      .replace(/\${AD_SERVER_PRICE}/g, adServerPrice);
+    utils.triggerPixel(winNotificationUrl);
+  }
+}
 
 function buildOpenRtbBidRequestPayload(validBidRequests, bidderRequest) {
   const imps = validBidRequests.map(br => buildOpenRtbImpObject(br));
@@ -187,7 +198,8 @@ export const spec = {
   supportedMediaTypes: [BANNER],
   isBidRequestValid,
   buildRequests,
-  interpretResponse
+  interpretResponse,
+  onBidWon
 };
 
 registerBidder(spec);
