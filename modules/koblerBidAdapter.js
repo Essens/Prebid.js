@@ -38,7 +38,7 @@ export const interpretResponse = function (serverResponse) {
           height: b.h,
           creativeId: b.crid,
           dealId: b.dealid,
-          netRevenue: false,
+          netRevenue: true,
           ttl: TIME_TO_LIVE_IN_SECONDS,
           ad: b.adm,
           meta: {
