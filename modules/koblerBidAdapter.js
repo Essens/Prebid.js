@@ -1,10 +1,11 @@
 import * as utils from '../src/utils.js';
 import {config} from '../src/config.js';
 import {registerBidder} from '../src/adapters/bidderFactory.js';
-import {BANNER} from '../src/mediaTypes';
+import {BANNER} from '../src/mediaTypes.js';
 
 const BIDDER_CODE = 'kobler';
 const BIDDER_ENDPOINT = 'https://bid.essrtb.com/bid/prebid_rtb_call';
+const TIMEOUT_NOTIFICATION_ENDPOINT = 'https://bid.essrtb.com/notify/prebid_timeout';
 const DEFAULT_CURRENCY = 'USD';
 const DEFAULT_TIMEOUT = 1000;
 const TIME_TO_LIVE_IN_SECONDS = 10 * 60;
@@ -62,11 +63,28 @@ export const onBidWon = function (bid) {
   }
 }
 
+export const onTimeout = function (timeoutDataArray) {
+  if (utils.isArray(timeoutDataArray)) {
+    timeoutDataArray.forEach(timeoutData => {
+      const query = utils.parseQueryStringParameters({
+        ad_unit_code: timeoutData.adUnitCode,
+        auction_id: timeoutData.auctionId,
+        bid_id: timeoutData.bidId,
+        timeout: timeoutData.timeout,
+        placement_id: utils.deepAccess(timeoutData, 'params.0.placementId'),
+        page_url: window.location.href,
+      });
+      const timeoutNotificationUrl = `${TIMEOUT_NOTIFICATION_ENDPOINT}?${query}`;
+      utils.triggerPixel(timeoutNotificationUrl);
+    })
+  }
+}
+
 function buildOpenRtbBidRequestPayload(validBidRequests, bidderRequest) {
   const imps = validBidRequests.map(br => buildOpenRtbImpObject(br));
   const timeout = bidderRequest.timeout || config.getConfig('bidderTimeout') || DEFAULT_TIMEOUT;
-  const pageUrl = (bidderRequest.refererInfo && bidderRequest.refererInfo.referer) ?
-    bidderRequest.refererInfo.referer
+  const pageUrl = (bidderRequest.refererInfo && bidderRequest.refererInfo.referer)
+    ? bidderRequest.refererInfo.referer
     : window.location.href;
 
   const request = {
@@ -199,7 +217,8 @@ export const spec = {
   isBidRequestValid,
   buildRequests,
   interpretResponse,
-  onBidWon
+  onBidWon,
+  onTimeout
 };
 
 registerBidder(spec);
