@@ -28,9 +28,12 @@
                         const bids = pbjs.getHighestCpmBids(adUnitCode);
                         const winningBid = bids[0];
                         const div = document.getElementById('banner');
-                        let iframe = document.createElement('iframe');
-                        iframe.frameBorder = '0';
-                        div.appendChild(iframe);
+                        let iframe = div.querySelector('iframe')
+                        if (iframe === null) {
+                            iframe = document.createElement('iframe');
+                            iframe.frameBorder = '0';
+                            div.appendChild(iframe);
+                        }
                         var iframeDoc = iframe.contentWindow.document;
                         pbjs.renderAd(iframeDoc, winningBid.adId);
                     }
@@ -39,6 +42,12 @@
 
             function refreshBids() {
                 pbjs.que.push(requestBids);
+            }
+
+            function refreshPageViewId() {
+                pbjs.que.push(function () {
+                    pbjs.refreshPageViewId()
+                });
             }
 
             pbjs.que.push(function () {
@@ -86,8 +95,9 @@
     </head>
     <body>
         <h2>Prebid Test Bidder Example</h2>
-        <h5>Banner ad</h5>
         <p><button onclick="refreshBids()">Refresh Ad Units</button></p>
+        <p><button onclick="refreshPageViewId()">Refresh page view ID</button></p>
+        <h5>Banner ad</h5>
         <div id="banner"></div>
     </body>
 </html>
