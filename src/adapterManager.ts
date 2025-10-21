@@ -545,9 +545,6 @@ const adapterManager = {
         const uniquePbsTid = generateUUID();
 
         (serverBidders.length === 0 && hasModuleBids ? [null] : serverBidders).forEach(bidderCode => {
-
-          console.log(`generating for s2s bidder: ${bidderCode}`)
-
           const tids = tidFor(extTids, bidderCode, () => ({}));
           const bidderRequestId = generateUUID();
           const pageViewId = getPageViewIdForBidder(bidderCode);
